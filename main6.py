@@ -8,6 +8,10 @@ import cantools
 from cantools.database.can import Message, Signal, Database, Node
 from pprint import pprint
 import math, random, time
+from signal_help import describe_signal
+from tkinter import messagebox
+
+
 
 # Matplotlib for plotting
 from matplotlib.figure import Figure
@@ -87,6 +91,12 @@ class SegmentWidget(ttk.Frame):
         fault_signal       = f"SEG_{self.seg_id}_isFaultDetected"
         comms_fault_signal = f"SEG_{self.seg_id}_isCommsError"
 
+        self.voltage_label.bind("<Button-3>", lambda e: self.winfo_toplevel().show_signal_info(voltage_signal))
+        self.temp_label.bind("<Button-3>", lambda e: self.winfo_toplevel().show_signal_info(temp_signal))
+        self.fault_label.bind("<Button-3>", lambda e: self.winfo_toplevel().show_signal_info(fault_signal))
+        self.commsFault_label.bind("<Button-3>", lambda e: self.winfo_toplevel().show_signal_info(comms_fault_signal))
+
+
         self.voltage_label.bind("<Button-1>",    lambda event: [select_callback(self.seg_id), plot_callback(voltage_signal)])
         self.temp_label.bind("<Button-1>",       lambda event: [select_callback(self.seg_id), plot_callback(temp_signal)])
         self.fault_label.bind("<Button-1>",      lambda event: [select_callback(self.seg_id), plot_callback(fault_signal)])
@@ -153,6 +163,13 @@ class CellWidget(ttk.Frame):
         temp_signal      = f"CELL_{seg}x{cell_idx}_Temp"
         fault_signal     = f"CELL_{seg}x{cell_idx}_isFaultDetected"
         discharge_signal = f"CELL_{seg}x{cell_idx}_isDischarging"
+
+        self.voltage_label.bind("<Button-3>", lambda e: self.winfo_toplevel().show_signal_info(voltage_signal))
+        self.voltageDiff_label.bind("<Button-3>", lambda e: self.winfo_toplevel().show_signal_info(diff_signal))
+        self.temp_label.bind("<Button-3>", lambda e: self.winfo_toplevel().show_signal_info(temp_signal))
+        self.fault_label.bind("<Button-3>", lambda e: self.winfo_toplevel().show_signal_info(fault_signal))
+        self.discharging_label.bind("<Button-3>", lambda e: self.winfo_toplevel().show_signal_info(discharge_signal))
+
 
         self.voltage_label.bind("<Button-1>",     lambda event: [select_callback(self.cell_id), plot_callback(voltage_signal)])
         self.voltageDiff_label.bind("<Button-1>", lambda event: [select_callback(self.cell_id), plot_callback(diff_signal)])
@@ -416,6 +433,12 @@ class Application(tk.Tk):
         self.on_segment_selected(1) # Highlight the default segment at startup
         self.on_cell_selected((0,0)) # Highlight the default cell at startup
 
+    def show_signal_info(self, signal_name: str):
+        unit = self.data_units.get(signal_name, "")
+        messagebox.showinfo(
+            "Signal info",
+            f"{signal_name}\nUnit: {unit or '(none)'}\n\n{describe_signal(signal_name)}"
+        )
 
 
     def _demo_tick(self):
