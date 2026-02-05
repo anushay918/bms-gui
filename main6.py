@@ -7,11 +7,17 @@ import can
 import cantools
 from cantools.database.can import Message, Signal, Database, Node
 from pprint import pprint
-
+import math, random, time
 
 # Matplotlib for plotting
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+import sv_ttk
+
+def apply_theme(root):
+    sv_ttk.set_theme("dark") 
+
 
 # --- Helper Functions ---
 
@@ -49,138 +55,133 @@ class CANListener(can.Listener):
         print(f"An error occurred in the CAN listener: {exc}")
 
 # --- New UI Component Classes ---
-
 class SegmentWidget(ttk.Frame):
     """A widget representing a single BMS segment."""
     def __init__(self, parent, seg_id: int, select_callback, plot_callback):
         super().__init__(parent, borderwidth=1, relief="solid")
         self.seg_id = seg_id
-        
+
         # --- Layout Configuration ---
-        self.columnconfigure(0, weight=5) # Temp
-        self.columnconfigure(1, weight=1) # Fault
-        self.columnconfigure(2, weight=1) # Comms_Fault
+        self.columnconfigure(0, weight=5)
+        self.columnconfigure(1, weight=1)
+        self.columnconfigure(2, weight=1)
         self.rowconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
-        # --- Widgets ---
-        self.voltage_label      = ttk.Label(self, text="--- V"  , anchor="center", background="gray", cursor="hand2")
-        self.temp_label         = ttk.Label(self, text="-- °C"  , anchor="center", background="gray", cursor="hand2")
-        self.fault_label        = ttk.Label(self, text="FT"     , anchor="center", background="gray", cursor="hand2")
-        self.commsFault_label   = ttk.Label(self, text="CF"     , anchor="center", background="gray", cursor="hand2")
+        # Use tk.Label for dynamic background colors (ttk themes may ignore background=)
+        tile = dict(bg="#505050", fg="white")  # base tile colors for dark theme
 
-        self.voltage_label.grid     (row=0, column=0, columnspan=3, sticky="nsew", pady=1)
-        self.temp_label.grid        (row=1, column=0, sticky="nsew", padx=(0,1))
-        self.fault_label.grid       (row=1, column=1, sticky="nsew", padx=(0,1))
-        self.commsFault_label.grid  (row=1, column=2, sticky="nsew")
-        
+        self.voltage_label    = tk.Label(self, text="--- V", anchor="center", cursor="hand2", **tile)
+        self.temp_label       = tk.Label(self, text="-- °C", anchor="center", cursor="hand2", **tile)
+        self.fault_label      = tk.Label(self, text="FT",    anchor="center", cursor="hand2", **tile)
+        self.commsFault_label = tk.Label(self, text="CF",    anchor="center", cursor="hand2", **tile)
+
+        self.voltage_label.grid    (row=0, column=0, columnspan=3, sticky="nsew", pady=1)
+        self.temp_label.grid       (row=1, column=0, sticky="nsew", padx=(0,1))
+        self.fault_label.grid      (row=1, column=1, sticky="nsew", padx=(0,1))
+        self.commsFault_label.grid (row=1, column=2, sticky="nsew")
+
         # --- Click Binding ---
-        # Bind individual labels for plotting
-        voltage_signal      = f"SEG_{self.seg_id}_IC_Voltage"
-        temp_signal         = f"SEG_{self.seg_id}_IC_Temp"
-        fault_signal        = f"SEG_{self.seg_id}_isFaultDetected"
-        comms_fault_signal  = f"SEG_{self.seg_id}_isCommsError"
-        
-        self.voltage_label.bind("<Button-1>",       lambda event: [select_callback(self.seg_id), plot_callback(voltage_signal)])
-        self.temp_label.bind("<Button-1>",          lambda event: [select_callback(self.seg_id), plot_callback(temp_signal)])
-        self.fault_label.bind("<Button-1>",         lambda event: [select_callback(self.seg_id), plot_callback(fault_signal)])
-        self.commsFault_label.bind("<Button-1>",    lambda event: [select_callback(self.seg_id), plot_callback(comms_fault_signal)])
+        voltage_signal     = f"SEG_{self.seg_id}_IC_Voltage"
+        temp_signal        = f"SEG_{self.seg_id}_IC_Temp"
+        fault_signal       = f"SEG_{self.seg_id}_isFaultDetected"
+        comms_fault_signal = f"SEG_{self.seg_id}_isCommsError"
 
+        self.voltage_label.bind("<Button-1>",    lambda event: [select_callback(self.seg_id), plot_callback(voltage_signal)])
+        self.temp_label.bind("<Button-1>",       lambda event: [select_callback(self.seg_id), plot_callback(temp_signal)])
+        self.fault_label.bind("<Button-1>",      lambda event: [select_callback(self.seg_id), plot_callback(fault_signal)])
+        self.commsFault_label.bind("<Button-1>", lambda event: [select_callback(self.seg_id), plot_callback(comms_fault_signal)])
 
     def update_data(self, voltage: float, temp: float, is_faulted: bool, is_comms_fault: bool):
         """Updates the text and colors of the segment display."""
         # Update Voltage
         if voltage is not None:
             self.voltage_label.config(text=f"{voltage:.3f} V")
-            # Assuming a segment voltage range of 16 cells * 3.0V to 16 * 4.2V
-            color = interpolate_color(voltage, 48.0, 67.2, "#FF0000", "#00FF00") # Red to Green
-            self.voltage_label.config(background=color)
+            color = interpolate_color(voltage, 48.0, 67.2, "#FF0000", "#00FF00")
+            self.voltage_label.config(bg=color)
 
         # Update Temperature
         if temp is not None:
             self.temp_label.config(text=f"{temp:.2f} °C")
-            color = interpolate_color(temp, 10, 100, "#00FF00", "#FF0000") # Green to Red
-            self.temp_label.config(background=color)
-        
+            color = interpolate_color(temp, 10, 100, "#00FF00", "#FF0000")
+            self.temp_label.config(bg=color)
+
         # Update Flags
         if is_faulted is not None:
-            self.fault_label.config(background="#FF0000" if is_faulted else "gray") # Red or Gray
-        
+            self.fault_label.config(bg="#FF0000" if is_faulted else "#505050")
+
         if is_comms_fault is not None:
-            self.commsFault_label.config(background="#FFA500" if is_comms_fault else "gray") # Orange or Gray
+            self.commsFault_label.config(bg="#FFA500" if is_comms_fault else "#505050")
+
 
 
 class CellWidget(ttk.Frame):
     """A widget representing a single BMS cell."""
     def __init__(self, parent, cell_id: tuple, select_callback, plot_callback):
         super().__init__(parent, borderwidth=1, relief="solid")
-        self.cell_id = cell_id # cell_id is a tuple (row, col)
-        
+        self.cell_id = cell_id  # (row, col)
+
         # --- Layout Configuration ---
-        self.columnconfigure(0, weight=5) # Temp
-        self.columnconfigure(1, weight=1) # Fault
-        self.columnconfigure(2, weight=1) # Discharging
+        self.columnconfigure(0, weight=5)
+        self.columnconfigure(1, weight=1)
+        self.columnconfigure(2, weight=1)
         self.rowconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
-        # --- Widgets ---
-        self.voltage_label      = ttk.Label(self, text="--- V"  , anchor="center", background="gray", cursor="hand2")
-        self.voltageDiff_label  = ttk.Label(self, text="-- mV"  , anchor="center", background="gray", cursor="hand2")
-        self.temp_label         = ttk.Label(self, text="-- °C"  , anchor="center", background="gray", cursor="hand2")
-        self.fault_label        = ttk.Label(self, text="FT"     , anchor="center", background="gray", cursor="hand2")
-        self.discharging_label  = ttk.Label(self, text="DC"     , anchor="center", background="gray", cursor="hand2")
+        # Use tk.Label for dynamic background colors
+        tile = dict(bg="#505050", fg="white")
+
+        self.voltage_label     = tk.Label(self, text="--- V",  anchor="center", cursor="hand2", **tile)
+        self.voltageDiff_label = tk.Label(self, text="-- mV",  anchor="center", cursor="hand2", **tile)
+        self.temp_label        = tk.Label(self, text="-- °C",  anchor="center", cursor="hand2", **tile)
+        self.fault_label       = tk.Label(self, text="FT",     anchor="center", cursor="hand2", **tile)
+        self.discharging_label = tk.Label(self, text="DC",     anchor="center", cursor="hand2", **tile)
 
         self.voltage_label.grid     (row=0, column=0, columnspan=1, sticky="nsew", pady=1, padx=(0,1))
         self.voltageDiff_label.grid (row=0, column=1, columnspan=2, sticky="nsew", pady=1)
         self.temp_label.grid        (row=1, column=0, sticky="nsew", padx=(0,1))
         self.fault_label.grid       (row=1, column=1, sticky="nsew", padx=(0,1))
         self.discharging_label.grid (row=1, column=2, sticky="nsew")
-        
+
         # --- Click Binding ---
-        # Bind individual labels for plotting
         row, col = self.cell_id
         seg = col + 1
         cell_idx = row + 1
-        voltage_signal      = f"CELL_{seg}x{cell_idx}_Voltage"
-        diff_signal         = f"CELL_{seg}x{cell_idx}_VoltageDiff"
-        temp_signal         = f"CELL_{seg}x{cell_idx}_Temp"
-        fault_signal        = f"CELL_{seg}x{cell_idx}_isFaultDetected"
-        discharge_signal    = f"CELL_{seg}x{cell_idx}_isDischarging"
-        
-        self.voltage_label.bind("<Button-1>",       lambda event: [select_callback(self.cell_id), plot_callback(voltage_signal)])
-        self.voltageDiff_label.bind("<Button-1>",   lambda event: [select_callback(self.cell_id), plot_callback(diff_signal)])
-        self.temp_label.bind("<Button-1>",          lambda event: [select_callback(self.cell_id), plot_callback(temp_signal)])
-        self.fault_label.bind("<Button-1>",         lambda event: [select_callback(self.cell_id), plot_callback(fault_signal)])
-        self.discharging_label.bind("<Button-1>",   lambda event: [select_callback(self.cell_id), plot_callback(discharge_signal)])
 
+        voltage_signal   = f"CELL_{seg}x{cell_idx}_Voltage"
+        diff_signal      = f"CELL_{seg}x{cell_idx}_VoltageDiff"
+        temp_signal      = f"CELL_{seg}x{cell_idx}_Temp"
+        fault_signal     = f"CELL_{seg}x{cell_idx}_isFaultDetected"
+        discharge_signal = f"CELL_{seg}x{cell_idx}_isDischarging"
+
+        self.voltage_label.bind("<Button-1>",     lambda event: [select_callback(self.cell_id), plot_callback(voltage_signal)])
+        self.voltageDiff_label.bind("<Button-1>", lambda event: [select_callback(self.cell_id), plot_callback(diff_signal)])
+        self.temp_label.bind("<Button-1>",        lambda event: [select_callback(self.cell_id), plot_callback(temp_signal)])
+        self.fault_label.bind("<Button-1>",       lambda event: [select_callback(self.cell_id), plot_callback(fault_signal)])
+        self.discharging_label.bind("<Button-1>", lambda event: [select_callback(self.cell_id), plot_callback(discharge_signal)])
 
     def update_data(self, voltage: float, voltageDiff: int, temp: float, is_faulted: bool, is_discharging: bool):
         """Updates the text and colors of the cell display."""
-        # Update Voltage
         if voltage is not None:
             self.voltage_label.config(text=f"{voltage:.3f} V")
-            color = interpolate_color(voltage, 3.0, 4.2, "#FF0000", "#00FF00") # Red to Green
-            self.voltage_label.config(background=color)
+            color = interpolate_color(voltage, 3.0, 4.2, "#FF0000", "#00FF00")
+            self.voltage_label.config(bg=color)
 
-        # Update Diff
         if voltageDiff is not None:
             self.voltageDiff_label.config(text=f"{voltageDiff:+} mV")
-            color = interpolate_color(abs(voltageDiff), 0, 500, "#00FF00", "#FF0000") # Green to Red
-            self.voltageDiff_label.config(background=color)
+            color = interpolate_color(abs(voltageDiff), 0, 500, "#00FF00", "#FF0000")
+            self.voltageDiff_label.config(bg=color)
 
-        # Update Temperature
         if temp is not None:
             self.temp_label.config(text=f"{temp:.2f} °C")
-            color = interpolate_color(temp, 10, 100, "#00FF00", "#FF0000") # Green to Red
-            self.temp_label.config(background=color)
-        
-        # Update Flags
-        if is_faulted is not None:
-            self.fault_label.config(background="#FF0000" if is_faulted else "gray") # Red or Gray
-        
-        if is_discharging is not None:
-            self.discharging_label.config(background="#0000FF" if is_discharging else "gray") # Blue or Gray
+            color = interpolate_color(temp, 10, 100, "#00FF00", "#FF0000")
+            self.temp_label.config(bg=color)
 
+        if is_faulted is not None:
+            self.fault_label.config(bg="#FF0000" if is_faulted else "#505050")
+
+        if is_discharging is not None:
+            self.discharging_label.config(bg="#0000FF" if is_discharging else "#505050")
 
 class SystemInfoFrame(ttk.Frame):
     """A frame to display overall system voltage and current."""
@@ -224,6 +225,91 @@ class SystemInfoFrame(ttk.Frame):
             self.current_value_label.config(text="--- A")
             
 
+# class LogFrame(ttk.LabelFrame):
+#     """A frame for displaying incoming CAN messages that are not on the main GUI (Treeview version)."""
+#     def __init__(self, parent):
+#         super().__init__(parent, text="Other CAN Data", padding=8)
+#         self.columnconfigure(0, weight=1)
+#         self.rowconfigure(0, weight=1)
+
+#         # Container for tree + scrollbar
+#         container = ttk.Frame(self)
+#         container.grid(row=0, column=0, sticky="nsew")
+#         container.columnconfigure(0, weight=1)
+#         container.rowconfigure(0, weight=1)
+
+#         # Treeview (table)
+#         self.tree = ttk.Treeview(
+#             container,
+#             columns=("time", "id", "msg"),
+#             show="headings",
+#             selectmode="browse",
+#         )
+#         self.tree.grid(row=0, column=0, sticky="nsew")
+
+#         # Scrollbar (vertical)
+#         v_scroll = ttk.Scrollbar(container, orient="vertical", command=self.tree.yview)
+#         v_scroll.grid(row=0, column=1, sticky="ns")
+#         self.tree.configure(yscrollcommand=v_scroll.set)
+
+#         # Headings
+#         self.tree.heading("time", text="Time")
+#         self.tree.heading("id", text="CAN ID")
+#         self.tree.heading("msg", text="Message")
+
+#         # Column sizing (tweak as you like)
+#         self.tree.column("time", width=95, stretch=False, anchor="w")
+#         self.tree.column("id", width=70, stretch=False, anchor="w")
+#         self.tree.column("msg", width=600, stretch=True, anchor="w")
+
+#         # Map CAN ID -> tree item iid (so we can update in place)
+#         self.id_to_iid = {}
+#         self.iid_order = []  # keep insertion order for trimming
+
+#         self.max_rows = 500
+
+#     def log_message(self, msg_content: str, can_id: int):
+#         """Insert/update one row per CAN ID."""
+#         timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+#         can_id_str = f"{can_id:#05x}"
+
+#         if can_id in self.id_to_iid:
+#             iid = self.id_to_iid[can_id]
+#             self.tree.item(iid, values=(timestamp, can_id_str, msg_content))
+#         else:
+#             iid = f"id_{can_id_str}"  # stable iid
+#             self.tree.insert("", "end", iid=iid, values=(timestamp, can_id_str, msg_content))
+#             self.id_to_iid[can_id] = iid
+#             self.iid_order.append(can_id)
+
+#             # Trim oldest if too big
+#             if len(self.iid_order) > self.max_rows:
+#                 oldest_id = self.iid_order.pop(0)
+#                 oldest_iid = self.id_to_iid.pop(oldest_id, None)
+#                 if oldest_iid is not None:
+#                     self.tree.delete(oldest_iid)
+
+#         # Auto-scroll to bottom (nice for live logs)
+#         children = self.tree.get_children("")
+#         if children:
+#             self.tree.see(children[-1])
+
+
+#     def _add_new_log_entry(self, log_entry: str, can_id: int):
+#         """Helper to add a new entry to the log and manage list size."""
+#         # Remove the oldest entry if the log is full (keeps the list size at 500)
+#         if len(self.log_order) >= 500:
+#             self.log_order.pop(0)
+#             self.text_list.delete(0)
+        
+#         # Add the new entry to the end
+#         self.log_order.append(can_id)
+#         self.text_list.insert(tk.END, log_entry)
+        
+#         # Auto-scroll to the bottom only if the user hasn't scrolled up
+#         if self.text_list.yview()[1] > 0.99:
+#              self.text_list.yview_moveto(1.0)
+
 class LogFrame(ttk.LabelFrame):
     """A frame for displaying incoming CAN messages that are not on the main GUI."""
     def __init__(self, parent):
@@ -241,61 +327,49 @@ class LogFrame(ttk.LabelFrame):
         v_scrollbar = ttk.Scrollbar(list_frame, orient="vertical")
         h_scrollbar = ttk.Scrollbar(list_frame, orient="horizontal")
 
-        self.text_list = tk.Listbox(list_frame,
-                                      yscrollcommand=v_scrollbar.set,
-                                      xscrollcommand=h_scrollbar.set,
-                                      font=("Courier New", 8)) # Monospace font for alignment
-        
+        self.text_list = tk.Listbox(
+            list_frame,
+            yscrollcommand=v_scrollbar.set,
+            xscrollcommand=h_scrollbar.set,
+            font=("Courier New", 8)
+        )
+
         v_scrollbar.config(command=self.text_list.yview)
         h_scrollbar.config(command=self.text_list.xview)
-        
+
         # Grid placement
         self.text_list.grid(row=0, column=0, sticky="nsew")
         v_scrollbar.grid(row=0, column=1, sticky="ns")
         h_scrollbar.grid(row=1, column=0, sticky="ew")
 
-        # Stores CAN IDs in the order they appear in the listbox.
-        # The index of an ID here corresponds to its row index in the listbox.
-        self.log_order = [] 
+        self.log_order = []
 
     def log_message(self, msg_content: str, can_id: int):
-        """
-        Updates or inserts a message in the log based on its CAN ID.
-        Only one entry per CAN ID is shown, and it is updated in place.
-        """
         timestamp = datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]
-        
-        # Pad the hex ID for consistent alignment
         header = f"{timestamp} | ID: {can_id:<#05x}"
         log_entry = f"{header} | {msg_content}"
 
         if can_id in self.log_order:
-            # --- Update the existing entry ---
             try:
                 index = self.log_order.index(can_id)
                 self.text_list.delete(index)
                 self.text_list.insert(index, log_entry)
             except ValueError:
-                # This is a recovery mechanism in case log_order gets out of sync.
                 self._add_new_log_entry(log_entry, can_id)
         else:
-            # --- Add a new entry ---
             self._add_new_log_entry(log_entry, can_id)
 
     def _add_new_log_entry(self, log_entry: str, can_id: int):
-        """Helper to add a new entry to the log and manage list size."""
-        # Remove the oldest entry if the log is full (keeps the list size at 500)
         if len(self.log_order) >= 500:
             self.log_order.pop(0)
             self.text_list.delete(0)
-        
-        # Add the new entry to the end
+
         self.log_order.append(can_id)
         self.text_list.insert(tk.END, log_entry)
-        
-        # Auto-scroll to the bottom only if the user hasn't scrolled up
+
         if self.text_list.yview()[1] > 0.99:
-             self.text_list.yview_moveto(1.0)
+            self.text_list.yview_moveto(1.0)
+
 
 
 class Application(tk.Tk):
@@ -324,9 +398,14 @@ class Application(tk.Tk):
         self.plotted_signal_name = None # Name of the signal currently in the plot
         
         # --- UI Setup ---
+        apply_theme(self)
         self._initialize_ui_layout()
         self._initialize_ui_components()
         self._initialize_plot()
+        self.demo_mode = True  # set True when you’re not connected to car
+        if self.demo_mode:
+            self.after(200, self._demo_tick)
+
 
         # --- CAN Bus and Logging Initialization ---
         self._initialize_can_and_logging(usb_can_path, bitrate)
@@ -336,6 +415,52 @@ class Application(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.on_segment_selected(1) # Highlight the default segment at startup
         self.on_cell_selected((0,0)) # Highlight the default cell at startup
+
+
+
+    def _demo_tick(self):
+        # time axis similar to CAN relative_time
+        t = time.time()
+        if self.start_timestamp == 0:
+            self.start_timestamp = t
+        rt = t - self.start_timestamp
+
+        # Pack
+        pack_v = 320 + 10*math.sin(rt/5)
+        pack_i = 5*math.sin(rt/2)
+
+        self._demo_push("BMS_Pack_Voltage", rt, pack_v)
+        self._demo_push("BMS_Pack_Current", rt, pack_i)
+
+        # Segments + cells (basic plausible values)
+        for seg in range(1, 8):
+            seg_v = 56 + 2*math.sin(rt/3 + seg)
+            seg_t = 25 + 5*math.sin(rt/4 + seg/2)
+
+            self._demo_push(f"SEG_{seg}_IC_Voltage", rt, seg_v)
+            self._demo_push(f"SEG_{seg}_IC_Temp", rt, seg_t)
+            self._demo_push(f"SEG_{seg}_isFaultDetected", rt, 1 if random.random() < 0.002 else 0)
+            self._demo_push(f"SEG_{seg}_isCommsError", rt, 1 if random.random() < 0.001 else 0)
+
+            for cell in range(1, 17):
+                v = 3.75 + 0.08*math.sin(rt/2 + (seg*cell)/20) + random.uniform(-0.005, 0.005)
+                vd = int((v - 3.75) * 1000)  # mV-ish diff
+                temp = 28 + 6*math.sin(rt/6 + cell/5) + random.uniform(-0.2, 0.2)
+
+                self._demo_push(f"CELL_{seg}x{cell}_Voltage", rt, v)
+                self._demo_push(f"CELL_{seg}x{cell}_VoltageDiff", rt, vd)
+                self._demo_push(f"CELL_{seg}x{cell}_Temp", rt, temp)
+                self._demo_push(f"CELL_{seg}x{cell}_isDischarging", rt, 1 if random.random() < 0.02 else 0)
+                self._demo_push(f"CELL_{seg}x{cell}_isFaultDetected", rt, 1 if random.random() < 0.003 else 0)
+
+        # keep ticking
+        self.after(200, self._demo_tick)
+
+    def _demo_push(self, signal_name, rt, value):
+        if signal_name in self.data_log:
+            self.data_log[signal_name].append((rt, value))
+            if signal_name in self.signal_to_widget_map:
+                self.update_widget_for_signal(signal_name)
 
     def _initialize_ui_layout(self):
         # Main layout frames
