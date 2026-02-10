@@ -219,10 +219,26 @@ class SystemInfoFrame(ttk.Frame):
         current_text_label.grid(row=1, column=0, sticky="nsew", padx=5)
 
         # --- Value Labels ---
-        self.voltage_value_label = ttk.Label(self, text="--- V", font=("Helvetica", 32), cursor="hand2", background="#D5D5D5", anchor="center")
+        self.voltage_value_label = tk.Label(
+            self,
+            text="--- V",
+            font=("Segoe UI", 32),
+            cursor="hand2",
+            bg="#2b2b2b",
+            fg="white",
+            anchor="center"
+        )
         self.voltage_value_label.grid(row=0, column=1, sticky="nsew", pady=3)
         
-        self.current_value_label = ttk.Label(self, text="--- A", font=("Helvetica", 32), cursor="hand2", background="#D5D5D5", anchor="center")
+        self.current_value_label = tk.Label(
+            self,
+            text="--- A",
+            font=("Segoe UI", 32),
+            cursor="hand2",
+            bg="#2b2b2b",
+            fg="white",
+            anchor="center"
+        )
         self.current_value_label.grid(row=1, column=1, sticky="nsew")
 
         # Bind for plotting
