@@ -449,6 +449,19 @@ class Application(tk.Tk):
         self.on_segment_selected(1) # Highlight the default segment at startup
         self.on_cell_selected((0,0)) # Highlight the default cell at startup
 
+    def _apply_plot_dark_theme(self):
+        self.fig.set_facecolor("#111111")
+        self.ax.set_facecolor("#111111")
+
+        self.ax.tick_params(colors="white")
+        self.ax.xaxis.label.set_color("white")
+        self.ax.yaxis.label.set_color("white")
+        self.ax.title.set_color("white")
+
+        for spine in self.ax.spines.values():
+            spine.set_color("#444444")
+
+
     def show_signal_info(self, signal_name: str):
         unit = self.data_units.get(signal_name, "")
         messagebox.showinfo(
@@ -761,6 +774,9 @@ class Application(tk.Tk):
     def update_plot(self):
         """Clears and redraws the plot for the currently selected signal."""
         self.ax.cla() # Clear the single axis
+        self._apply_plot_dark_theme()
+        self.ax.grid(True, linestyle='--', alpha=0.25)
+
         
         if self.plotted_signal_name:
             signal_data = self.data_log.get(self.plotted_signal_name, [])
