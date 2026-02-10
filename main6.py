@@ -490,6 +490,9 @@ class Application(tk.Tk):
         self.on_segment_selected(1) # Highlight the default segment at startup
         self.on_cell_selected((0,0)) # Highlight the default cell at startup
 
+    def can_connected(self) -> bool:
+        return self.bus is not None and self.notifier is not None
+
 
     def _is_alert_bg(self, bg: str) -> bool:
         # colors you use for meaning
@@ -531,6 +534,11 @@ class Application(tk.Tk):
 
 
     def toggle_demo(self):
+
+        if self.can_connected():
+            messagebox.showinfo("Demo mode", "Demo mode is disabled while CAN is connected.")
+            return
+        
         self.demo_mode = not self.demo_mode
         self.demo_btn.config(text=f"Demo: {'ON' if self.demo_mode else 'OFF'}")
         if self.demo_mode:
@@ -577,6 +585,15 @@ class Application(tk.Tk):
 
 
     def _demo_tick(self):
+        if self.can_connected():
+            if self.demo_mode:
+                self.demo_mode = False
+                self.demo_btn.config(text="Demo: OFF")
+            return
+
+        if not self.demo_mode or self.paused:
+            self.after(200, self._demo_tick)
+            return
         # time axis similar to CAN relative_time
         if not self.demo_mode or self.paused:
             self.after(200, self._demo_tick)
@@ -759,6 +776,11 @@ class Application(tk.Tk):
             ]
             self.notifier = can.Notifier(self.bus, listeners)
             self.log_frame.log_message("Successfully connected to CAN bus.", 0x00)
+
+            # Auto-disable demo when CAN connects
+            if self.demo_mode:
+                self.demo_mode = False
+                self.demo_btn.config(text="Demo: OFF")
 
         except Exception as e:
             error_msg = f"Error initializing CAN: {e}"
