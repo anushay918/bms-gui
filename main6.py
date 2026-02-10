@@ -19,6 +19,12 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 import sv_ttk
 
+THEME = {
+    "dark":  {"tile_bg": "#505050", "tile_fg": "white", "pack_bg": "#2b2b2b", "pack_fg": "white", "plot_bg": "#111111", "spine": "#444444"},
+    "light": {"tile_bg": "#e6e6e6", "tile_fg": "black", "pack_bg": "#f0f0f0", "pack_fg": "black", "plot_bg": "white",  "spine": "#999999"},
+}
+
+
 def apply_theme(root):
     sv_ttk.set_theme("dark") 
 
@@ -116,12 +122,25 @@ class SegmentWidget(ttk.Frame):
             color = interpolate_color(temp, 10, 100, "#00FF00", "#FF0000")
             self.temp_label.config(bg=color)
 
-        # Update Flags
-        if is_faulted is not None:
-            self.fault_label.config(bg="#FF0000" if is_faulted else "#505050")
+        # # Update Flags
+        # if is_faulted is not None:
+        #     self.fault_label.config(bg="#FF0000" if is_faulted else "#505050")
 
-        if is_comms_fault is not None:
-            self.commsFault_label.config(bg="#FFA500" if is_comms_fault else "#505050")
+        # if is_comms_fault is not None:
+        #     self.commsFault_label.config(bg="#FFA500" if is_comms_fault else "#505050")
+
+        app = self.winfo_toplevel()
+        t = THEME[app.theme]
+
+        self.fault_label.config(
+            bg="#FF0000" if is_faulted else t["tile_bg"],
+            fg=t["tile_fg"]
+        )
+        self.commsFault_label.config(
+            bg="#FFA500" if is_comms_fault else t["tile_bg"],
+            fg=t["tile_fg"]
+        )
+
 
 
 
@@ -194,11 +213,25 @@ class CellWidget(ttk.Frame):
             color = interpolate_color(temp, 10, 100, "#00FF00", "#FF0000")
             self.temp_label.config(bg=color)
 
-        if is_faulted is not None:
-            self.fault_label.config(bg="#FF0000" if is_faulted else "#505050")
+        # if is_faulted is not None:
+        #     self.fault_label.config(bg="#FF0000" if is_faulted else "#505050")
 
-        if is_discharging is not None:
-            self.discharging_label.config(bg="#0000FF" if is_discharging else "#505050")
+        # if is_discharging is not None:
+        #     self.discharging_label.config(bg="#0000FF" if is_discharging else "#505050")
+
+        app = self.winfo_toplevel()
+        t = THEME[app.theme]
+
+        self.fault_label.config(
+            bg="#FF0000" if is_faulted else t["tile_bg"],
+            fg=t["tile_fg"]
+        )
+        self.discharging_label.config(
+            bg="#0000FF" if is_discharging else t["tile_bg"],
+            fg=t["tile_fg"]
+        )
+
+
 
 class SystemInfoFrame(ttk.Frame):
     """A frame to display overall system voltage and current."""
@@ -432,12 +465,20 @@ class Application(tk.Tk):
         
         # --- UI Setup ---
         apply_theme(self)
+
+        self.paused = False
+        self.demo_mode = True
+        self.theme = "dark"  # track current theme
+
         self._initialize_ui_layout()
         self._initialize_ui_components()
         self._initialize_plot()
-        self.demo_mode = True  # set True when you’re not connected to car
+
+        self.apply_custom_theme()
+
         if self.demo_mode:
             self.after(200, self._demo_tick)
+
 
 
         # --- CAN Bus and Logging Initialization ---
@@ -449,17 +490,82 @@ class Application(tk.Tk):
         self.on_segment_selected(1) # Highlight the default segment at startup
         self.on_cell_selected((0,0)) # Highlight the default cell at startup
 
-    def _apply_plot_dark_theme(self):
-        self.fig.set_facecolor("#111111")
-        self.ax.set_facecolor("#111111")
 
-        self.ax.tick_params(colors="white")
-        self.ax.xaxis.label.set_color("white")
-        self.ax.yaxis.label.set_color("white")
-        self.ax.title.set_color("white")
+    def _is_alert_bg(self, bg: str) -> bool:
+        # colors you use for meaning
+        return bg.lower() in ("#ff0000", "#ffa500", "#0000ff")
+
+
+    def apply_custom_theme(self):
+        t = THEME[self.theme]
+
+        # Pack big labels (SystemInfoFrame uses tk.Label now)
+        self.system_info_frame.voltage_value_label.config(bg=t["pack_bg"], fg=t["pack_fg"])
+        self.system_info_frame.current_value_label.config(bg=t["pack_bg"], fg=t["pack_fg"])
+
+        # Tiles: only reset ones that are in "neutral" state (avoid overwriting red/orange/blue fault colors)
+        for seg in self.segments:
+            if seg is None:
+                continue
+            for lbl in (seg.voltage_label, seg.temp_label, seg.fault_label, seg.commsFault_label):
+                if not self._is_alert_bg(lbl.cget("bg")):
+                    lbl.config(bg=t["tile_bg"], fg=t["tile_fg"])
+                else:
+                    lbl.config(fg=t["tile_fg"])
+
+        for row in self.cells:
+            for cell in row:
+                if cell is None:
+                    continue
+                for lbl in (cell.voltage_label, cell.voltageDiff_label, cell.temp_label, cell.fault_label, cell.discharging_label):
+                    if not self._is_alert_bg(lbl.cget("bg")):
+                        lbl.config(bg=t["tile_bg"], fg=t["tile_fg"])
+                    else:
+                        lbl.config(fg=t["tile_fg"])
+
+
+        # Plot recolor + redraw
+        self._apply_plot_theme()
+        self.canvas.draw()
+
+
+
+    def toggle_demo(self):
+        self.demo_mode = not self.demo_mode
+        self.demo_btn.config(text=f"Demo: {'ON' if self.demo_mode else 'OFF'}")
+        if self.demo_mode:
+            self.after(200, self._demo_tick)
+
+    def toggle_pause(self):
+        self.paused = not self.paused
+        self.pause_btn.config(text="Resume" if self.paused else "Pause")
+
+    def clear_plot(self):
+        if self.plotted_signal_name and self.plotted_signal_name in self.data_log:
+            self.data_log[self.plotted_signal_name].clear()
+        self.update_plot()
+
+    def toggle_theme(self):
+        self.theme = "light" if self.theme == "dark" else "dark"
+        sv_ttk.set_theme(self.theme)
+        self.theme_btn.config(text=f"Theme: {'Dark' if self.theme == 'dark' else 'Light'}")
+        self.apply_custom_theme()
+
+    def _apply_plot_theme(self):
+        t = THEME[self.theme]
+        self.fig.set_facecolor(t["plot_bg"])
+        self.ax.set_facecolor(t["plot_bg"])
+
+        tick_color = "white" if self.theme == "dark" else "black"
+        self.ax.tick_params(colors=tick_color)
+        self.ax.xaxis.label.set_color(tick_color)
+        self.ax.yaxis.label.set_color(tick_color)
+        self.ax.title.set_color(tick_color)
 
         for spine in self.ax.spines.values():
-            spine.set_color("#444444")
+            spine.set_color(t["spine"])
+
+        self.ax.grid(True, linestyle="--", alpha=0.25)
 
 
     def show_signal_info(self, signal_name: str):
@@ -472,6 +578,10 @@ class Application(tk.Tk):
 
     def _demo_tick(self):
         # time axis similar to CAN relative_time
+        if not self.demo_mode or self.paused:
+            self.after(200, self._demo_tick)
+            return
+
         t = time.time()
         if self.start_timestamp == 0:
             self.start_timestamp = t
@@ -516,6 +626,29 @@ class Application(tk.Tk):
 
     def _initialize_ui_layout(self):
         # Main layout frames
+        # --- Top toolbar ---
+        toolbar = ttk.Frame(self, padding=(10, 8))
+        toolbar.pack(fill="x")
+
+        title = ttk.Label(toolbar, text="BMS Monitor", font=("Segoe UI", 14))
+        title.pack(side="left")
+
+        # Right side buttons
+        btn_frame = ttk.Frame(toolbar)
+        btn_frame.pack(side="right")
+
+        self.demo_btn = ttk.Button(btn_frame, text="Demo: ON", command=self.toggle_demo)
+        self.demo_btn.pack(side="left", padx=4)
+
+        self.pause_btn = ttk.Button(btn_frame, text="Pause", command=self.toggle_pause)
+        self.pause_btn.pack(side="left", padx=4)
+
+        self.clear_plot_btn = ttk.Button(btn_frame, text="Clear plot", command=self.clear_plot)
+        self.clear_plot_btn.pack(side="left", padx=4)
+
+        self.theme_btn = ttk.Button(btn_frame, text="Theme: Dark", command=self.toggle_theme)
+        self.theme_btn.pack(side="left", padx=4)
+
         main_frame = ttk.Frame(self)
         main_frame.pack(fill="both", expand=True, padx=10, pady=10)
         main_frame.columnconfigure(0, weight=3) # Cell grid and plot
@@ -634,6 +767,10 @@ class Application(tk.Tk):
             self.bus = None
 
     def process_can_messages(self):
+        if self.paused:
+            self.after(100, self.process_can_messages)
+            return
+
         try:
             while not self.can_message_queue.empty():
                 msg: can.Message = self.can_message_queue.get_nowait()
@@ -774,7 +911,7 @@ class Application(tk.Tk):
     def update_plot(self):
         """Clears and redraws the plot for the currently selected signal."""
         self.ax.cla() # Clear the single axis
-        self._apply_plot_dark_theme()
+        self._apply_plot_theme()
         self.ax.grid(True, linestyle='--', alpha=0.25)
 
         
