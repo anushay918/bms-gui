@@ -22,6 +22,49 @@ THEME = {
     "light": {"tile_bg": "#e6e6e6", "tile_fg": "black", "pack_bg": "#f0f0f0", "pack_fg": "black", "plot_bg": "white",  "spine": "#999999"},
 }
 
+# --- SoC estimation from datasheet 1C discharge curve (Figure 1) ---
+# Table format: (cell_voltage_V, soc_percent)
+# Approx points eyeballed from Figure 1 (1C). Tweak if you want tighter fit.
+SOC_VOLTAGE_TABLE_1C = [
+    (4.20, 100),
+    (4.05, 95),
+    (3.98, 90),
+    (3.93, 80),
+    (3.86, 70),
+    (3.79, 60),
+    (3.71, 50),
+    (3.62, 40),
+    (3.52, 30),
+    (3.40, 20),
+    (3.30, 15),
+    (3.18, 10),
+    (2.98, 5),
+    (2.80, 0),
+]
+
+def voltage_to_soc_percent(cell_v: float, table=SOC_VOLTAGE_TABLE_1C) -> float:
+    """Map cell voltage to SoC% using piecewise-linear interpolation."""
+    if cell_v is None or math.isnan(cell_v):
+        return float("nan")
+
+    # Clamp outside range
+    v_max, soc_max = table[0]
+    v_min, soc_min = table[-1]
+    if cell_v >= v_max:
+        return float(soc_max)
+    if cell_v <= v_min:
+        return float(soc_min)
+
+    # Find segment (table is descending V)
+    for (v1, s1), (v2, s2) in zip(table, table[1:]):
+        if v1 >= cell_v >= v2:
+            # Linear interpolation between (v1,s1) and (v2,s2)
+            t = (cell_v - v2) / (v1 - v2) if (v1 - v2) != 0 else 0.0
+            return s2 + t * (s1 - s2)
+
+    return float("nan")
+
+
 
 def apply_theme(root, theme: str):
     sv_ttk.set_theme(theme)
@@ -186,11 +229,14 @@ class SystemInfoFrame(ttk.Frame):
 
         self.columnconfigure(0, weight=0)
         self.columnconfigure(1, weight=1)
-        self.rowconfigure(0, weight=1)
-        self.rowconfigure(1, weight=1)
+
+        # was 2 rows; now 3
+        for r in range(3):
+            self.rowconfigure(r, weight=1)
 
         ttk.Label(self, text="Voltage:", font=("Helvetica", 32), anchor="w").grid(row=0, column=0, sticky="nsew", padx=5, pady=3)
         ttk.Label(self, text="Current:", font=("Helvetica", 32), anchor="w").grid(row=1, column=0, sticky="nsew", padx=5)
+        ttk.Label(self, text="SoC:",     font=("Helvetica", 32), anchor="w").grid(row=2, column=0, sticky="nsew", padx=5)
 
         self.voltage_value_label = tk.Label(self, text="--- V", font=("Segoe UI", 32), cursor="hand2",
                                             bg="#2b2b2b", fg="white", anchor="center")
@@ -200,12 +246,18 @@ class SystemInfoFrame(ttk.Frame):
                                             bg="#2b2b2b", fg="white", anchor="center")
         self.current_value_label.grid(row=1, column=1, sticky="nsew")
 
+        self.soc_value_label = tk.Label(self, text="--- %", font=("Segoe UI", 32), cursor="hand2",
+                                        bg="#2b2b2b", fg="white", anchor="center")
+        self.soc_value_label.grid(row=2, column=1, sticky="nsew", pady=3)
+
         self.voltage_value_label.bind("<Button-1>", lambda e: plot_callback("BMS_Pack_Voltage"))
         self.current_value_label.bind("<Button-1>", lambda e: plot_callback("BMS_Pack_Current"))
+        self.soc_value_label.bind("<Button-1>",     lambda e: plot_callback("BMS_Pack_SoC"))
 
-    def update_values(self, voltage, current):
+    def update_values(self, voltage, current, soc):
         self.voltage_value_label.config(text=f"{voltage:.2f} V" if voltage is not None else "--- V")
         self.current_value_label.config(text=f"{current:.2f} A" if current is not None else "--- A")
+        self.soc_value_label.config(text=f"{soc:.1f} %" if soc is not None else "--- %")
 
 
 class LogFrame(ttk.LabelFrame):
@@ -276,6 +328,10 @@ class Application(tk.Tk):
 
         self.data_log = {signal.name: [] for msg in self.db.messages for signal in msg.signals}
         self.data_units = {signal.name: signal.unit for msg in self.db.messages for signal in msg.signals}
+        # Synthetic signal (not in DBC)
+        self.data_log["BMS_Pack_SoC"] = []
+        self.data_units["BMS_Pack_SoC"] = "%"
+
         self.signal_to_widget_map = {}
 
         self.segments = []
@@ -292,6 +348,8 @@ class Application(tk.Tk):
 
         self._initialize_ui_layout()
         self._initialize_ui_components()
+        self.signal_to_widget_map["BMS_Pack_SoC"] = self.system_info_frame
+
         self._initialize_plot()
 
         self.apply_custom_theme()
@@ -305,6 +363,29 @@ class Application(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.on_segment_selected(1)
         self.on_cell_selected((0, 0))
+
+    def _latest_value(self, signal_name: str):
+        arr = self.data_log.get(signal_name)
+        return arr[-1][1] if arr else None
+
+    def estimate_pack_soc(self) -> float | None:
+        """Estimate pack SoC% from cell voltages using the 1C curve."""
+        cell_voltages = []
+        for seg in range(1, 8):
+            for cell in range(1, 17):
+                v = self._latest_value(f"CELL_{seg}x{cell}_Voltage")
+                if isinstance(v, (int, float)):
+                    cell_voltages.append(float(v))
+
+        if not cell_voltages:
+            return None
+
+        # Choose ONE representative voltage:
+        rep_v = min(cell_voltages)   # conservative (recommended)
+        # rep_v = sum(cell_voltages) / len(cell_voltages)  # smoother alternative
+
+        return voltage_to_soc_percent(rep_v)
+
 
     def can_connected(self) -> bool:
         return self.bus is not None and self.notifier is not None
@@ -637,6 +718,15 @@ class Application(tk.Tk):
                 except Exception as e:
                     print(f"Error decoding or processing message: {e}")
 
+                        # After processing a batch, update SoC once (avoids recalcing 1000x per frame)
+            soc = self.estimate_pack_soc()
+            if soc is not None:
+                # Use "relative_time" from the last processed message in this batch.
+                # If no messages were processed, keep time as-is.
+                t = relative_time if 'relative_time' in locals() else (time.time() - self.start_timestamp if self.start_timestamp else 0.0)
+                self.data_log["BMS_Pack_SoC"].append((t, soc))
+                self.update_widget_for_signal("BMS_Pack_SoC")
+
         finally:
             self.after(100, self.process_can_messages)
 
@@ -682,7 +772,9 @@ class Application(tk.Tk):
         elif isinstance(widget, SystemInfoFrame):
             v = self.data_log.get("BMS_Pack_Voltage", [])[-1][1] if self.data_log.get("BMS_Pack_Voltage") else None
             c = self.data_log.get("BMS_Pack_Current", [])[-1][1] if self.data_log.get("BMS_Pack_Current") else None
-            widget.update_values(v, c)
+            soc = self.data_log.get("BMS_Pack_SoC", [])[-1][1] if self.data_log.get("BMS_Pack_SoC") else None
+            widget.update_values(v, c, soc)
+
 
         if signal_name == self.plotted_signal_name:
             self.update_plot()
